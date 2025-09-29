@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GlamAR VTO — Responsive Demo</title>
+  <script src="https://www.glamar.io/sdk/wrapper"></script>
+  <style>
+    :root {
+      --bg: #0b0b0b;
+      --fg: #f7f7f7;
+      --accent: #6ee7b7;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+    }
+
+    #glamar_container_wrapper {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex: 1;
+    }
+
+    #glamar_container {
+      width: 100%;
+      max-width: 1200px;
+      background: #000;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      transition: height 200ms ease;
+      position: relative;
+    }
+
+    .sku-strip {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      padding: 10px;
+      -webkit-overflow-scrolling: touch;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      background: rgba(20,20,20,0.95);
+      z-index: 1000;
+    }
+
+    .sku-strip::-webkit-scrollbar { height: 8px; }
+    .sku-strip::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 8px; }
+
+    .sku-button {
+      flex: 0 0 auto;
+      width: 60px;
+      height: 60px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      color: var(--fg);
+      font-weight: 600;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+    }
+    .sku-button.active {
+      background: rgba(110,231,183,0.18);
+      border-color: var(--accent);
+    }
+
+    @media (max-width: 768px) {
+      .sku-strip {
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+      }
+      #glamar_container {
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
+      }
+    }
+      .topbar { display:flex; gap:8px; align-items:center; justify-content:flex-end; padding:8px 10px; }
+    .btn {
+      appearance:none; border:1px solid rgba(255,255,255,0.16); background:rgba(255,255,255,0.06);
+      color:var(--fg); border-radius:10px; padding:8px 12px; font-weight:600; cursor:pointer;
+    }
+    .btn:active { transform: translateY(1px); }
+
+    @media (max-width: 768px) {
+      .sku-strip {
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+      }
+      #glamar_container { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+      .topbar { position: sticky; top: 0; backdrop-filter: blur(6px); background: rgba(10,10,10,0.5); z-index: 1001; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="btn" id="flushBtn" title="Force-release WebGL & camera">Flush Memory</button>
+  </div>
+  <div id="glamar_container_wrapper">
+    <div id="glamar_container"></div>
+  </div>
+  </div>
+
+  <nav class="sku-strip" id="skuStrip"></nav>
+
+  <script>
+    // ====== CONFIG ======
+    const GLAMAR_ACCESS_KEY = "02ae7fad-ca9f-4efc-87c3-b4b7ee53a99d";
+    const CATEGORY = "eyeglasses";
+
+    const SKU_LIST = [
+    "ST006703017","ST002501001","ST005502001","ST002502007","ST002503030","ST000701007","ST002502049","ST000703030","AC000532005","ST000703032",
+    "ST002501024","ST000701049","ST002503007","ST006703062","ST013203030","ST000701030","ST002502024","ST000703007","ST003102059","ST002902050",
+    "ST002902050","ST003102007","ST003203017","ST003204014","AC000932010S23","ST002603024","ST004803007","ST002003049","ST004403001","ST004403049",
+    "ST005802007","ST003101059","ST009102024","ST003102001","ST009102066","ST009102030","ST003102054","ST003101017","ST003101007","VB000913015",
+    ];
+
+    function isMobile() {
+      return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+             || window.matchMedia("(max-width: 768px)").matches;
+    }
+
+    function setContainerSize() {
+      const el = document.getElementById("glamar_container");
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      if (isMobile()) {
+        const width = Math.min(vw, 6000);
+        const height = Math.round(width * (16/9));
+        el.style.height = Math.min(height, vh * 0.70) + "px";
+      } else {
+        const width = Math.min(vw * 0.92, 1200);
+        const height = Math.round(width * (9/16));
+        el.style.height = Math.min(height, vh * 0.82) + "px";
+      }
+    }
+
+    window.addEventListener("resize", setContainerSize);
+    window.addEventListener("orientationchange", () => setTimeout(setContainerSize, 200));
+
+    // ====== LIFECYCLE & EVENTS ======
+    let applying = false;
+    let appliedCount = 0;
+
+    function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+    function attachEvents(){
+      const G = window.GlamAR;
+      if (!G || !G.addEventListener) return;
+      const log = (n)=> (p)=> console.log(`[GlamAR] ${n}`, p||"");
+      ["loaded","opened","closed","sku-applied","sku-failed","error"].forEach(ev=>G.addEventListener(ev, log(ev)));
+      if (G.addEventListener) {
+        G.addEventListener("sku-applied", ()=> { applying = false; });
+        G.addEventListener("error", ()=> { applying = false; });
+        G.addEventListener("sku-failed", ()=> { applying = false; });
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", async function () {
+      setContainerSize();
+      window.GlamAR.init(
+        "glamar_container",
+        GLAMAR_ACCESS_KEY,
+        {
+          platform: "web",
+          category: CATEGORY,
+          configuration: {
+            global: { openLiveOnInit: true },
+            ar: { disable3DUI: false },
+          },
+        }
+      );
+      attachEvents();
+      buildSkuButtons();
+    });
+
+    // ====== APPLY QUEUE & GC HINTS (no SDK reset) ======
+    const applyQueue = [];
+    let processing = false;
+
+    function enqueueApply(id, btn){
+      applyQueue.push({id, btn});
+      if (!processing) processQueue();
+    }
+
+    async function processQueue(){
+      processing = true;
+      while (applyQueue.length){
+        const {id, btn} = applyQueue.shift();
+        await applySkuById(id, btn);
+        await gcHint();
+      }
+      processing = false;
+    }
+
+    async function gcHint(){
+      // Yield to event loop
+      await new Promise(r=>setTimeout(r,0));
+      if ('requestIdleCallback' in window){
+        await new Promise(r=>requestIdleCallback(()=>r(), {timeout:120}));
+      }
+      // Best-effort JS heap hint
+      try { if (typeof window.gc === 'function') window.gc(); } catch(_){/* ignored */}
+
+      // If available (Chrome-only), watch heap pressure and pause if high
+      try {
+        const m = performance.memory;
+        if (m && m.usedJSHeapSize / m.jsHeapSizeLimit > 0.85){
+          console.warn('Heap high; pausing to let GC run');
+          await new Promise(r=>setTimeout(r,120));
+        }
+      } catch(_){}
+    }
+
+    function buildSkuButtons() {
+      const strip = document.getElementById("skuStrip");
+      strip.innerHTML = "";
+      SKU_LIST.forEach((skuId, idx) => {
+        const btn = document.createElement("button");
+        btn.className = "sku-button";
+        btn.textContent = idx + 1; // keep numeric labels; can swap to skuId if you prefer
+        btn.addEventListener("click", () => enqueueApply(skuId, btn));
+        strip.appendChild(btn);
+      });
+    }
+
+    // ====== MEMORY: Explicitly clear previous SKU before applying a new one ======
+    async function clearPreviousSku(){
+      const G = window.GlamAR;
+      if (!G) return;
+      try {
+        if (typeof G.removeSku === 'function') { await G.removeSku(); return; }
+        if (typeof G.clearSku === 'function') { await G.clearSku(); return; }
+        if (typeof G.clear === 'function') { await G.clear(); return; }
+        if (typeof G.dispose === 'function') { await G.dispose(); return; }
+        // Last-ditch: close & reopen session to free WebGL assets
+        if (typeof G.close === 'function' && typeof G.open === 'function') {
+          G.close();
+          await sleep(150);
+          G.open();
+        }
+      } catch(e){
+        console.warn('Clear previous SKU failed:', e);
+      }
+    }
+
+    async function softResetIfNeeded(){
+      const G = window.GlamAR;
+      appliedCount++;
+      if (appliedCount % 6 === 0 && G && typeof G.close === 'function' && typeof G.open === 'function'){
+        try { G.close(); await sleep(150); G.open(); } catch(e){ console.warn('Soft reset failed', e); }
+      }
+    }
+
+    async function applySkuById(id, buttonEl) {
+      if (applying) return; // throttle to avoid piling up
+      applying = true;
+
+      document.querySelectorAll('.sku-button').forEach(b => b.classList.remove('active'));
+      if (buttonEl) buttonEl.classList.add('active');
+
+      try {
+        await clearPreviousSku();
+        await sleep(50); // small gap helps on some devices
+        if (window.GlamAR && typeof window.GlamAR.applyBySku === 'function') {
+          await window.GlamAR.applyBySku(id);
+        }
+        await softResetIfNeeded();
+      } catch(e){
+        console.error('applyBySku failed', e);
+      } finally {
+        applying = false;
+      }
+    }
+
+    // ====== HARD FLUSH (local-only): aggressively release resources ======
+    async function hardFlushMemory(){
+      try {
+        // 1) Try to stop camera tracks if a <video> is present
+        const video = document.querySelector('#glamar_container video');
+        const stream = video && video.srcObject;
+        if (stream && stream.getTracks) {
+          stream.getTracks().forEach(t => { try { t.stop(); } catch(_){} });
+          if (video) video.srcObject = null;
+        }
+
+        // 2) Provoke WebGL context loss on canvases inside the container
+        const canvases = document.querySelectorAll('#glamar_container canvas');
+        canvases.forEach(cv => {
+          try {
+            const gl = cv.getContext('webgl2') || cv.getContext('webgl') || cv.getContext('experimental-webgl');
+            const ext = gl && gl.getExtension('WEBGL_lose_context');
+            if (ext && typeof ext.loseContext === 'function') ext.loseContext();
+          } catch(_){}
+        });
+
+        // 3) Full teardown of SDK DOM node, then rebuild & re-init
+        const host = document.getElementById('glamar_container_wrapper');
+        const old = document.getElementById('glamar_container');
+        if (old) host.removeChild(old);
+        const fresh = document.createElement('div');
+        fresh.id = 'glamar_container';
+        fresh.style.height = ''; // let setContainerSize recalc
+        host.appendChild(fresh);
+
+        setContainerSize();
+        await sleep(50);
+        // Re-init SDK fresh
+        window.GlamAR.init(
+          'glamar_container',
+          GLAMAR_ACCESS_KEY,
+          {
+            platform: 'web',
+            category: CATEGORY,
+            configuration: { global: { openLiveOnInit: true }, ar: { disable3DUI: false } }
+          }
+        );
+        attachEvents();
+      } catch (e) {
+        console.warn('Hard flush failed', e);
+      }
+    }
+  </script>
+</body>
+</html>
